@@ -29,6 +29,7 @@ public class WebhookService {
 
     @Transactional
     public void handlePushEvent(String payloadJson) {
+        log.info("=== handlePushEvent called ===");
         try {
             JsonNode payload = objectMapper.readTree(payloadJson);
 
@@ -96,7 +97,7 @@ public class WebhookService {
                     project.getName(), result.getBreakingCount(), result.getNonBreakingCount());
 
         } catch (Exception e) {
-            log.error("❌ Error processing push webhook: {}", e.getMessage(), e);
+            log.error("Error processing push webhook: {}", e.getMessage(), e);
         }
     }
 
