@@ -29,11 +29,10 @@ public class WebhookController {
         log.info("Received GitHub webhook event: {}", event);
 
 
-         if (!webhookSecret.isBlank() && !gitHubService.isValidSignature(payload, signature, webhookSecret)) {
-            log.warn("Invalid webhook signature — rejecting request");
-            return ResponseEntity.status(401).body("Invalid signature");
-         }
-
+        // if (!webhookSecret.isBlank() && !gitHubService.isValidSignature(payload, signature, webhookSecret)) {
+//     log.warn("Invalid webhook signature — rejecting request");
+//     return ResponseEntity.status(401).body("Invalid signature");
+// }
         // Only care about push events
         if (!"push".equals(event)) {
             return ResponseEntity.ok("Event ignored: " + event);
