@@ -15,12 +15,22 @@ public class GitHubService {
 
     private final WebClient webClient;
 
-    public GitHubService() {
-        this.webClient = WebClient.builder()
-            .baseUrl("https://api.github.com")
-            .defaultHeader("Accept", "application/vnd.github.v3+json")
-            .defaultHeader("User-Agent", "SpecWatch/1.0")
-            .build();
+    // Inject the GITHUB_TOKEN environment variable directly into the constructor
+    public GitHubService(@Value("${GITHUB_TOKEN:}") String githubToken) {
+        WebClient.Builder builder = WebClient.builder()
+                .baseUrl("https://api.github.com")
+                .defaultHeader("Accept", "application/vnd.github.v3+json")
+                .defaultHeader("User-Agent", "SpecWatch/1.0");
+
+        // If the token exists, attach it to the API requests
+        if (githubToken != null && !githubToken.isBlank()) {
+            builder.defaultHeader("Authorization", "Bearer " + githubToken);
+            log.info("✅ GitHub Token successfully loaded into WebClient");
+        } else {
+            log.warn("⚠️ No GITHUB_TOKEN found. GitHub API requests might fail with 403 Forbidden.");
+        }
+
+        this.webClient = builder.build();
     }
 
     /**
@@ -36,10 +46,10 @@ public class GitHubService {
             String url = "/repos/" + repoFullName + "/contents/" + filePath + "?ref=" + ref;
 
             Map response = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .block();
+                    .uri(url)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
 
             if (response == null || !response.containsKey("content")) {
                 throw new RuntimeException("File not found: " + filePath + " in " + repoFullName);
@@ -70,10 +80,10 @@ public class GitHubService {
             String expectedSig = signatureHeader.substring(7);
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             mac.init(new javax.crypto.spec.SecretKeySpec(
-                secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"
+                    secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"
             ));
             byte[] hmac = mac.doFinal(
-                payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                    payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
             );
             String actualSig = bytesToHex(hmac);
             return expectedSig.equalsIgnoreCase(actualSig);
