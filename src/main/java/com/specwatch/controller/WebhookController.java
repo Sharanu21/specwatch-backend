@@ -26,16 +26,23 @@ public class WebhookController {
             @RequestHeader(value = "X-Hub-Signature-256", defaultValue = "") String signature,
             @RequestBody String payload
     ) {
+        log.info("Received GitHub webhook event: {}", event);
+
+        if (!webhookSecret.isBlank() && !gitHubService.isValidSignature(payload, signature, webhookSecret)) {
+            log.warn("Invalid webhook signature — rejecting request");
+            return ResponseEntity.status(401).body("Invalid signature");
+        }
+
         if (!"push".equals(event)) {
             return ResponseEntity.ok("Event ignored: " + event);
         }
 
         try {
             webhookService.handlePushEvent(payload);
-            return ResponseEntity.ok("SUCCESS: Webhook processed and saved to database.");
         } catch (Exception e) {
-            // This shoots the exact error straight back to GitHub!
-            return ResponseEntity.status(500).body("CRASH LOG: " + e.getMessage());
+            log.error("Webhook processing error: {}", e.getMessage(), e);
         }
+
+        return ResponseEntity.ok("Webhook received");
     }
 }
