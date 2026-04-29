@@ -28,9 +28,11 @@ public class WebhookController {
     ) {
         log.info("Received GitHub webhook event: {}", event);
 
-        if (!webhookSecret.isBlank() && !gitHubService.isValidSignature(payload, signature, webhookSecret)) {
-            log.warn("Invalid webhook signature — rejecting request");
-            return ResponseEntity.status(401).body("Invalid signature");
+        if (webhookSecret != null && !webhookSecret.isBlank()) {
+            if (!gitHubService.isValidSignature(payload, signature, webhookSecret)) {
+                log.warn("Invalid webhook signature");
+                return ResponseEntity.status(401).body("Invalid signature");
+            }
         }
 
         if (!"push".equals(event)) {
