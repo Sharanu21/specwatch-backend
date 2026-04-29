@@ -63,10 +63,19 @@ public class GitHubService {
     }
 
     public boolean isValidSignature(String payload, String signatureHeader, String secret) {
-        if (signatureHeader == null || !signatureHeader.startsWith("sha256=")) return false;
+        if (signatureHeader == null || signatureHeader.isBlank()) {
+            log.warn("No signature header received");
+            return false;
+        }
+
+        if (!signatureHeader.startsWith("sha256=")) {
+            log.warn("Signature header format invalid: {}", signatureHeader);
+            return false;
+        }
 
         try {
-            String expectedSig = signatureHeader.substring(7);
+            String expectedSig = signatureHeader.substring(7).trim();
+
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             mac.init(new javax.crypto.spec.SecretKeySpec(
                     secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"
@@ -75,6 +84,9 @@ public class GitHubService {
                     payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
             );
             String actualSig = bytesToHex(hmac);
+
+            log.info("Signature check — expected: {}, actual: {}", expectedSig, actualSig);
+
             return expectedSig.equalsIgnoreCase(actualSig);
         } catch (Exception e) {
             log.error("Signature validation error: {}", e.getMessage());
