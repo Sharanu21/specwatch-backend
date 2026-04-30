@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
@@ -43,7 +44,7 @@ public class GitHubService {
                     .uri(url)
                     .retrieve()
                     .bodyToMono(Map.class)
-                    .timeout(Duration.ofSeconds(10)) // 10-second safety cutoff
+                    .timeout(Duration.ofSeconds(10))
                     .block();
 
             if (response == null || !response.containsKey("content")) {
@@ -62,36 +63,36 @@ public class GitHubService {
         }
     }
 
-    public boolean isValidSignature(String payload, String signatureHeader, String secret) {
-        if (signatureHeader == null || signatureHeader.isBlank()) {
-            log.warn("No signature header received");
-            return false;
-        }
-
-        if (!signatureHeader.startsWith("sha256=")) {
-            log.warn("Signature header format invalid: {}", signatureHeader);
+    /**
+     * Fixes encoding issues by validating signature using raw bytes directly.
+     */
+    public boolean isValidSignatureBytes(byte[] rawPayload, String signatureHeader, String secret) {
+        if (signatureHeader == null || !signatureHeader.startsWith("sha256=")) {
+            log.warn("Invalid or missing signature header");
             return false;
         }
 
         try {
             String expectedSig = signatureHeader.substring(7).trim();
-
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             mac.init(new javax.crypto.spec.SecretKeySpec(
-                    secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"
+                    secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"
             ));
-            byte[] hmac = mac.doFinal(
-                    payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-            );
-            String actualSig = bytesToHex(hmac);
 
-            log.info("Signature check — expected: {}, actual: {}", expectedSig, actualSig);
+            byte[] hmac = mac.doFinal(rawPayload);
+            String actualSig = bytesToHex(hmac);
 
             return expectedSig.equalsIgnoreCase(actualSig);
         } catch (Exception e) {
             log.error("Signature validation error: {}", e.getMessage());
             return false;
         }
+    }
+
+    // Keeping the original String method for backward compatibility if needed
+    public boolean isValidSignature(String payload, String signatureHeader, String secret) {
+        if (payload == null) return false;
+        return isValidSignatureBytes(payload.getBytes(StandardCharsets.UTF_8), signatureHeader, secret);
     }
 
     private String bytesToHex(byte[] bytes) {
