@@ -53,12 +53,12 @@ public class Project {
     @Column(name = "last_checked_at")
     private LocalDateTime lastCheckedAt;
 
-    @JsonIgnore // 🚨 Prevents the infinite loop back to the User
-    @ManyToOne(fetch = FetchType.LAZY)
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.EAGER) // Changed from LAZY to EAGER
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @JsonIgnore // 🚨 Prevents infinite loop into the Change Reports array
+    @JsonIgnore
     @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<ChangeReport> changeReports;
 }

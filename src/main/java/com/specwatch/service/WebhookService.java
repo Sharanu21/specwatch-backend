@@ -81,20 +81,24 @@ public class WebhookService {
             String newVersion = extractVersion(newSpec);
             report.setNewVersion(newVersion);
 
-            // --- REPLACED NOTIFICATION BLOCK START ---
+            // --- EMAIL NOTIFICATION RESTORED WITH ISOLATED TRY-BLOCK ---
             if (!result.isFirstRun() && !result.isError()) {
                 try {
                     boolean slackSent = notificationService.sendSlackAlert(project, result, commitSha, pushedBy);
                     boolean discordSent = notificationService.sendDiscordAlert(project, result, commitSha, pushedBy);
 
-                    // Email removed temporarily to prevent LazyInitializationException rolling back the transaction
-                    report.setNotificationSent(slackSent || discordSent);
+                    // Email notification - Safe to call because of EAGER loading fix in Project.java
+                    String ownerEmail = project.getUser().getEmail();
+                    boolean emailSent = emailService.sendBreakingChangeAlert(
+                            ownerEmail, project, result, commitSha, pushedBy
+                    );
+
+                    report.setNotificationSent(slackSent || discordSent || emailSent);
                 } catch (Exception notifEx) {
                     log.error("Notification failed but continuing: {}", notifEx.getMessage());
                     report.setNotificationSent(false);
                 }
             }
-            // --- REPLACED NOTIFICATION BLOCK END ---
 
             changeReportRepository.save(report);
 
