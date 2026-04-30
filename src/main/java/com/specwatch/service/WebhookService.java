@@ -20,6 +20,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class WebhookService {
 
+    private final EmailService emailService;
     private final ProjectRepository projectRepository;
     private final ChangeReportRepository changeReportRepository;
     private final GitHubService gitHubService;
@@ -83,7 +84,14 @@ public class WebhookService {
             if (!result.isFirstRun() && !result.isError()) {
                 boolean slackSent = notificationService.sendSlackAlert(project, result, commitSha, pushedBy);
                 boolean discordSent = notificationService.sendDiscordAlert(project, result, commitSha, pushedBy);
-                report.setNotificationSent(slackSent || discordSent);
+
+                // Send email to project owner
+                String ownerEmail = project.getUser().getEmail();
+                boolean emailSent = emailService.sendBreakingChangeAlert(
+                        ownerEmail, project, result, commitSha, pushedBy
+                );
+
+                report.setNotificationSent(slackSent || discordSent || emailSent);
             }
 
             changeReportRepository.save(report);
