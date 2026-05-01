@@ -1,4 +1,3 @@
-
 package com.specwatch.controller;
 
 import com.specwatch.dto.ProjectRequest;
@@ -37,9 +36,14 @@ public class ProjectController {
         map.put("specFilePath", p.getSpecFilePath());
         map.put("branch", p.getBranch());
 
-        // 🚨 FIX: Return boolean true/false instead of exposing the secret URL
+        // Return boolean true/false instead of exposing secret URLs
         map.put("slackWebhookUrl", p.getSlackWebhookUrl() != null && !p.getSlackWebhookUrl().isBlank());
         map.put("discordWebhookUrl", p.getDiscordWebhookUrl() != null && !p.getDiscordWebhookUrl().isBlank());
+
+        // Update: Add webhook token and boolean for github token
+        map.put("webhookToken", p.getWebhookToken());
+        map.put("hasGithubToken", p.getGithubToken() != null);
+        // Never expose the actual github token
 
         map.put("lastSpecVersion", p.getLastSpecVersion());
         map.put("lastSpecContent", p.getLastSpecContent());
@@ -87,7 +91,7 @@ public class ProjectController {
         project.setSpecFilePath(request.getSpecFilePath());
         project.setBranch(request.getBranch() != null ? request.getBranch() : "main");
 
-        // 🚨 FIX: Prevent saving empty strings as URLs
+        // Prevent saving empty strings as URLs
         project.setSlackWebhookUrl(
                 request.getSlackWebhookUrl() != null && !request.getSlackWebhookUrl().isBlank()
                         ? request.getSlackWebhookUrl() : null
@@ -95,6 +99,13 @@ public class ProjectController {
         project.setDiscordWebhookUrl(
                 request.getDiscordWebhookUrl() != null && !request.getDiscordWebhookUrl().isBlank()
                         ? request.getDiscordWebhookUrl() : null
+        );
+
+        // Update: Auto-generate unique webhook token
+        project.setWebhookToken(java.util.UUID.randomUUID().toString().replace("-", ""));
+        project.setGithubToken(
+                request.getGithubToken() != null && !request.getGithubToken().isBlank()
+                        ? request.getGithubToken() : null
         );
 
         project.setUser(user);
@@ -120,7 +131,6 @@ public class ProjectController {
         project.setSpecFilePath(request.getSpecFilePath());
         project.setBranch(request.getBranch());
 
-        // 🚨 FIX: Prevent saving empty strings as URLs
         project.setSlackWebhookUrl(
                 request.getSlackWebhookUrl() != null && !request.getSlackWebhookUrl().isBlank()
                         ? request.getSlackWebhookUrl() : null
@@ -129,6 +139,11 @@ public class ProjectController {
                 request.getDiscordWebhookUrl() != null && !request.getDiscordWebhookUrl().isBlank()
                         ? request.getDiscordWebhookUrl() : null
         );
+
+        // Optional: Update github token if provided in PUT
+        if (request.getGithubToken() != null) {
+            project.setGithubToken(!request.getGithubToken().isBlank() ? request.getGithubToken() : null);
+        }
 
         projectRepository.save(project);
         return ResponseEntity.ok(toMap(project));

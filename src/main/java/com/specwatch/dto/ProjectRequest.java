@@ -20,4 +20,6 @@ public class ProjectRequest {
     private String slackWebhookUrl;
 
     private String discordWebhookUrl;
+
+    private String githubToken; // optional — needed for private repos
 }

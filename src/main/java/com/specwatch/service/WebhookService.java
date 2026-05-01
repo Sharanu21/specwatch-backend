@@ -29,7 +29,7 @@ public class WebhookService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional
-    public void handlePushEvent(String payloadJson) {
+    public void handlePushEvent(String payloadJson, String token) {
         try {
             JsonNode payload = objectMapper.readTree(payloadJson);
 
@@ -40,7 +40,7 @@ public class WebhookService {
             String pushedBy = payload.path("pusher").path("name").asText();
             String commitMessage = payload.path("head_commit").path("message").asText();
 
-            log.info("Processing push: repo={} branch={} commit={}", repoFullName, branch, commitSha);
+            log.info("Processing push: repo={} branch={}", repoFullName, branch);
 
             Optional<Project> projectOpt = projectRepository
                     .findFirstByRepoFullNameAndBranch(repoFullName, branch);
@@ -52,14 +52,26 @@ public class WebhookService {
 
             Project project = projectOpt.get();
 
+            // Validate per-project token
+            if (project.getWebhookToken() != null && !project.getWebhookToken().isBlank()) {
+                if (!project.getWebhookToken().equals(token)) {
+                    log.warn("Invalid token for project {} — rejecting", project.getName());
+                    return;
+                }
+            }
+
+            // Use project's GitHub token if available, otherwise use default
+            String githubToken = project.getGithubToken();
+
             String newSpec = gitHubService.fetchFileContent(
                     repoFullName,
                     project.getSpecFilePath(),
-                    commitSha
+                    commitSha,
+                    githubToken
             );
 
             if (newSpec == null || newSpec.isBlank()) {
-                log.error("Empty spec file returned from GitHub for {}", project.getSpecFilePath());
+                log.error("Empty spec returned from GitHub");
                 return;
             }
 
@@ -81,27 +93,22 @@ public class WebhookService {
             String newVersion = extractVersion(newSpec);
             report.setNewVersion(newVersion);
 
-            // --- EMAIL NOTIFICATION RESTORED WITH ISOLATED TRY-BLOCK ---
             if (!result.isFirstRun() && !result.isError()) {
                 try {
                     boolean slackSent = notificationService.sendSlackAlert(project, result, commitSha, pushedBy);
                     boolean discordSent = notificationService.sendDiscordAlert(project, result, commitSha, pushedBy);
-
-                    // Email notification - Safe to call because of EAGER loading fix in Project.java
                     String ownerEmail = project.getUser().getEmail();
                     boolean emailSent = emailService.sendBreakingChangeAlert(
                             ownerEmail, project, result, commitSha, pushedBy
                     );
-
                     report.setNotificationSent(slackSent || discordSent || emailSent);
                 } catch (Exception notifEx) {
-                    log.error("Notification failed but continuing: {}", notifEx.getMessage());
+                    log.error("Notification failed: {}", notifEx.getMessage());
                     report.setNotificationSent(false);
                 }
             }
 
             changeReportRepository.save(report);
-
             project.setLastSpecContent(newSpec);
             project.setLastSpecVersion(newVersion);
             project.setLastCheckedAt(LocalDateTime.now());

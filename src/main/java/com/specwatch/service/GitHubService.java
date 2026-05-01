@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -16,10 +15,13 @@ import java.util.Map;
 public class GitHubService {
 
     private final WebClient webClient;
+    private final String githubBaseUrl;
 
     public GitHubService(
             @Value("${GITHUB_TOKEN:}") String githubToken,
             @Value("${github.api.base-url}") String githubBaseUrl) {
+
+        this.githubBaseUrl = githubBaseUrl;
 
         WebClient.Builder builder = WebClient.builder()
                 .baseUrl(githubBaseUrl)
@@ -36,11 +38,22 @@ public class GitHubService {
         this.webClient = builder.build();
     }
 
-    public String fetchFileContent(String repoFullName, String filePath, String ref) {
+    // Overloaded method to support project-specific tokens
+    public String fetchFileContent(String repoFullName, String filePath, String ref, String overrideToken) {
         try {
             String url = "/repos/" + repoFullName + "/contents/" + filePath + "?ref=" + ref;
 
-            Map response = webClient.get()
+            // Use specialized client if token is provided, otherwise use default
+            WebClient client = (overrideToken != null && !overrideToken.isBlank())
+                    ? WebClient.builder()
+                    .baseUrl(githubBaseUrl)
+                    .defaultHeader("Accept", "application/vnd.github.v3+json")
+                    .defaultHeader("User-Agent", "SpecWatch/1.0")
+                    .defaultHeader("Authorization", "Bearer " + overrideToken)
+                    .build()
+                    : this.webClient;
+
+            Map response = client.get()
                     .uri(url)
                     .retrieve()
                     .bodyToMono(Map.class)
@@ -63,9 +76,11 @@ public class GitHubService {
         }
     }
 
-    /**
-     * Fixes encoding issues by validating signature using raw bytes directly.
-     */
+    // Existing method for backward compatibility
+    public String fetchFileContent(String repoFullName, String filePath, String ref) {
+        return fetchFileContent(repoFullName, filePath, ref, null);
+    }
+
     public boolean isValidSignatureBytes(byte[] rawPayload, String signatureHeader, String secret) {
         if (signatureHeader == null || !signatureHeader.startsWith("sha256=")) {
             log.warn("Invalid or missing signature header");
@@ -89,7 +104,6 @@ public class GitHubService {
         }
     }
 
-    // Keeping the original String method for backward compatibility if needed
     public boolean isValidSignature(String payload, String signatureHeader, String secret) {
         if (payload == null) return false;
         return isValidSignatureBytes(payload.getBytes(StandardCharsets.UTF_8), signatureHeader, secret);

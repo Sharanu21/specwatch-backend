@@ -40,6 +40,14 @@ public class Project {
     @Column(name = "discord_webhook_url")
     private String discordWebhookUrl;
 
+    // Unique webhook token for this project
+    @Column(name = "webhook_token", unique = true)
+    private String webhookToken;
+
+    // Customer's GitHub token for private repos
+    @Column(name = "github_token")
+    private String githubToken;
+
     // Last known spec content stored as text — we diff against this
     @Column(name = "last_spec_content", columnDefinition = "TEXT")
     private String lastSpecContent;
