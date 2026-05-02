@@ -28,19 +28,15 @@ public class WebhookController {
             @RequestParam(value = "token", defaultValue = "") String token,
             @RequestBody String payload
     ) {
-        log.info("Received GitHub webhook event: {}", event);
-
         if (!"push".equals(event)) {
             return ResponseEntity.ok("Event ignored: " + event);
         }
 
         try {
-            // Update: Pass token to service for per-project validation
             webhookService.handlePushEvent(payload, token);
+            return ResponseEntity.ok("Webhook received and processed");
         } catch (Exception e) {
-            log.error("Webhook processing error: {}", e.getMessage(), e);
+            return ResponseEntity.ok("ERROR: " + e.getMessage());
         }
-
-        return ResponseEntity.ok("Webhook received");
     }
 }
