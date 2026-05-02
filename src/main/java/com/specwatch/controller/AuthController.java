@@ -5,6 +5,7 @@ import com.specwatch.dto.AuthRequest;
 import com.specwatch.dto.AuthResponse;
 import com.specwatch.model.User;
 import com.specwatch.repository.UserRepository;
+import com.specwatch.service.EmailVerificationService;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
@@ -33,6 +34,7 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
     private final JwtUtil jwtUtil;
+    private final EmailVerificationService emailVerificationService;
 
     // One bucket per IP — max 5 login attempts per minute
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
@@ -49,14 +51,13 @@ public class AuthController {
             @Valid @RequestBody AuthRequest request,
             jakarta.servlet.http.HttpServletRequest httpRequest
     ) {
-        // Rate limit registration too
         Bucket bucket = getBucket(httpRequest.getRemoteAddr());
         if (!bucket.tryConsume(1)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body("Too many attempts. Please wait a minute.");
         }
 
-        if (userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsByEmail(request.getEmail().toLowerCase().trim())) {
             return ResponseEntity.badRequest().body("Email already registered");
         }
 
@@ -64,8 +65,14 @@ public class AuthController {
         user.setEmail(request.getEmail().toLowerCase().trim());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setName(request.getName());
+        user.setEmailVerified(false);
+        user.setVerificationToken(java.util.UUID.randomUUID().toString());
         userRepository.save(user);
 
+        // Send verification email
+        emailVerificationService.sendVerificationEmail(user);
+
+        // Return token so they can use app (verification optional for now)
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
         String token = jwtUtil.generateToken(userDetails);
 
@@ -79,7 +86,6 @@ public class AuthController {
             @Valid @RequestBody AuthRequest request,
             jakarta.servlet.http.HttpServletRequest httpRequest
     ) {
-        // Rate limit — 5 attempts per minute per IP
         Bucket bucket = getBucket(httpRequest.getRemoteAddr());
         if (!bucket.tryConsume(1)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -94,7 +100,6 @@ public class AuthController {
                     )
             );
         } catch (Exception e) {
-            // Generic message — never tell attacker if email exists or not
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body("Invalid email or password");
         }

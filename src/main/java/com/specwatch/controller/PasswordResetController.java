@@ -1,5 +1,6 @@
 package com.specwatch.controller;
 
+import com.specwatch.service.EmailVerificationService;
 import com.specwatch.service.PasswordResetService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,8 @@ import java.util.Map;
 public class PasswordResetController {
 
     private final PasswordResetService passwordResetService;
+    private final EmailVerificationService emailVerificationService;
+
 
     @PostMapping("/forgot-password")
     public ResponseEntity<String> forgotPassword(@RequestBody Map<String, String> body) {
@@ -38,5 +41,14 @@ public class PasswordResetController {
             return ResponseEntity.badRequest().body("Invalid or expired reset link");
         }
         return ResponseEntity.ok("Password reset successfully");
+    }
+
+    @GetMapping("/verify-email")
+    public ResponseEntity<?> verifyEmail(@RequestParam String token) {
+        boolean success = emailVerificationService.verifyEmail(token);
+        if (!success) {
+            return ResponseEntity.badRequest().body("Invalid or expired verification link");
+        }
+        return ResponseEntity.ok("Email verified successfully! You can now login.");
     }
 }
