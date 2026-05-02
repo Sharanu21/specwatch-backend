@@ -1,5 +1,6 @@
 package com.specwatch.controller;
 
+import com.specwatch.repository.ProjectRepository;
 import com.specwatch.service.WebhookService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,13 @@ import org.springframework.web.bind.annotation.*;
 public class WebhookController {
 
     private final WebhookService webhookService;
+    private final ProjectRepository projectRepository;
+
+    @GetMapping("/test")
+    public ResponseEntity<String> test() {
+        long projectCount = projectRepository.count();
+        return ResponseEntity.ok("Backend alive. Projects in DB: " + projectCount);
+    }
 
     @PostMapping("/github")
     public ResponseEntity<String> handleGitHubWebhook(
