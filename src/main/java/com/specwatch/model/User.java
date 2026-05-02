@@ -43,8 +43,8 @@ public class User {
     @Column(name = "reset_token_expiry")
     private LocalDateTime resetTokenExpiry;
 
-    @Column(name = "email_verified")
-    private boolean emailVerified = false;
+    @Column(name = "email_verified", nullable = false, columnDefinition = "boolean default false")
+    private Boolean emailVerified = false;
 
     @Column(name = "verification_token")
     private String verificationToken;
