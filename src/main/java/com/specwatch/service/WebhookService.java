@@ -52,6 +52,8 @@ public class WebhookService {
 
             Project project = projectOpt.get();
 
+            log.info("Project token: {}, Received token: {}", project.getWebhookToken(), token);
+
             // Validate per-project token
             if (project.getWebhookToken() != null && !project.getWebhookToken().isBlank()) {
                 if (!project.getWebhookToken().equals(token)) {
