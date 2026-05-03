@@ -87,7 +87,7 @@ public class SecurityConfig {
             frontendUrl,
             "http://localhost:5000",
             "http://localhost:5173",
-            "https://*.netlify.app",
+            "https://*.vercel.app",
             "https://*.onrender.com"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
