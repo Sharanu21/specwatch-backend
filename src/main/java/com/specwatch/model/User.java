@@ -49,6 +49,9 @@ public class User {
     @Column(name = "verification_token")
     private String verificationToken;
 
+    @Column(name = "provider")
+    private String provider = "LOCAL";
+
     public enum Plan {
         FREE, TEAM, PRO
     }

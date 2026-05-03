@@ -9,12 +9,15 @@ import com.specwatch.service.EmailVerificationService;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,7 +39,9 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final EmailVerificationService emailVerificationService;
 
-    // One bucket per IP — max 5 login attempts per minute
+    private static final int MAX_BUCKET_ENTRIES = 50_000;
+
+    // Per-IP rate limiter: max 5 requests per minute on auth endpoints
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
     private Bucket getBucket(String ip) {
@@ -46,10 +51,18 @@ public class AuthController {
         );
     }
 
+    /** Evict all buckets hourly to prevent unbounded memory growth under IP rotation attacks. */
+    @Scheduled(fixedDelay = 3_600_000)
+    public void evictBuckets() {
+        if (buckets.size() > MAX_BUCKET_ENTRIES) {
+            buckets.clear();
+        }
+    }
+
     @PostMapping("/register")
     public ResponseEntity<?> register(
             @Valid @RequestBody AuthRequest request,
-            jakarta.servlet.http.HttpServletRequest httpRequest
+            HttpServletRequest httpRequest
     ) {
         Bucket bucket = getBucket(httpRequest.getRemoteAddr());
         if (!bucket.tryConsume(1)) {
@@ -69,10 +82,8 @@ public class AuthController {
         user.setVerificationToken(java.util.UUID.randomUUID().toString());
         userRepository.save(user);
 
-        // Send verification email
         emailVerificationService.sendVerificationEmail(user);
 
-        // Return token so they can use app (verification optional for now)
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
         String token = jwtUtil.generateToken(userDetails);
 
@@ -84,7 +95,7 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<?> login(
             @Valid @RequestBody AuthRequest request,
-            jakarta.servlet.http.HttpServletRequest httpRequest
+            HttpServletRequest httpRequest
     ) {
         Bucket bucket = getBucket(httpRequest.getRemoteAddr());
         if (!bucket.tryConsume(1)) {
@@ -115,5 +126,49 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(
                 token, user.getEmail(), user.getName(), user.getPlan().name()
         ));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<?> me(@AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Not authenticated");
+        }
+        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
+        return ResponseEntity.ok(new AuthResponse(null, user.getEmail(), user.getName(), user.getPlan().name()));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<?> changePassword(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestBody Map<String, String> body,
+            HttpServletRequest httpRequest
+    ) {
+        Bucket bucket = getBucket(httpRequest.getRemoteAddr());
+        if (!bucket.tryConsume(1)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body("Too many attempts. Please wait a minute.");
+        }
+
+        String currentPassword = body.get("currentPassword");
+        String newPassword = body.get("newPassword");
+
+        if (currentPassword == null || currentPassword.isBlank()) {
+            return ResponseEntity.badRequest().body("Current password is required");
+        }
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 128) {
+            return ResponseEntity.badRequest().body("New password must be 8–128 characters");
+        }
+
+        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
+
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body("Current password is incorrect");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        return ResponseEntity.ok("Password updated successfully");
     }
 }
