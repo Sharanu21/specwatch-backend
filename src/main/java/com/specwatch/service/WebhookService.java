@@ -42,29 +42,35 @@ public class WebhookService {
 
             log.info("Processing push: repo={} branch={}", repoFullName, branch);
 
-            Optional<Project> projectOpt = projectRepository
-                    .findFirstByRepoFullNameAndBranch(repoFullName, branch);
+            // FIX: look up by token FIRST (unique, owned by one user), then verify repo/branch.
+            // This prevents cross-user collisions where two users watch the same repo.
+            if (token == null || token.isBlank()) {
+                log.warn("Webhook rejected: no token provided");
+                return;
+            }
+
+            Optional<Project> projectOpt = projectRepository.findByWebhookToken(token);
 
             if (projectOpt.isEmpty()) {
-                log.info("No project found for {}/{} — skipping", repoFullName, branch);
+                log.warn("Webhook rejected: no project found for provided token");
                 return;
             }
 
             Project project = projectOpt.get();
 
-            // Diagnostic log: project name, stored token, received token
-            log.info("Found project: {} webhookToken: {} receivedToken: {}",
-                    project.getName(), project.getWebhookToken(), token);
-
-            // Validate per-project token
-            if (project.getWebhookToken() != null && !project.getWebhookToken().isBlank()) {
-                if (!project.getWebhookToken().equals(token)) {
-                    log.warn("Invalid token for project {} — rejecting", project.getName());
-                    return;
-                }
+            // Verify the push is for the repo+branch this project monitors
+            if (!project.getRepoFullName().equalsIgnoreCase(repoFullName)) {
+                log.warn("Token valid but repo mismatch: expected={} got={}", project.getRepoFullName(), repoFullName);
+                return;
             }
 
-            // Use project's GitHub token if available, otherwise use default
+            if (!project.getBranch().equalsIgnoreCase(branch)) {
+                log.info("Push to branch '{}' ignored — project monitors '{}'", branch, project.getBranch());
+                return;
+            }
+
+            log.info("Processing push for project: {}", project.getName());
+
             String githubToken = project.getGithubToken();
 
             String newSpec = gitHubService.fetchFileContent(
@@ -75,7 +81,7 @@ public class WebhookService {
             );
 
             if (newSpec == null || newSpec.isBlank()) {
-                log.error("Empty spec returned from GitHub");
+                log.error("Empty spec returned from GitHub for project {}", project.getName());
                 return;
             }
 
@@ -118,7 +124,7 @@ public class WebhookService {
             project.setLastCheckedAt(LocalDateTime.now());
             projectRepository.save(project);
 
-            log.info("✅ Processed push for {}: breaking={}, nonBreaking={}",
+            log.info("Processed push for {}: breaking={}, nonBreaking={}",
                     project.getName(), result.getBreakingCount(), result.getNonBreakingCount());
 
         } catch (Exception e) {

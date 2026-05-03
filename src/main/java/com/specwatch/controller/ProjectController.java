@@ -7,6 +7,7 @@ import com.specwatch.model.User;
 import com.specwatch.repository.ChangeReportRepository;
 import com.specwatch.repository.ProjectRepository;
 import com.specwatch.repository.UserRepository;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -28,6 +29,10 @@ public class ProjectController {
     private final UserRepository userRepository;
     private final ChangeReportRepository changeReportRepository;
 
+    /**
+     * Serialize a Project to a safe API map.
+     * Never exposes: githubToken, slackWebhookUrl (raw), discordWebhookUrl (raw), lastSpecContent.
+     */
     private Map<String, Object> toMap(Project p) {
         Map<String, Object> map = new HashMap<>();
         map.put("id", p.getId());
@@ -35,28 +40,26 @@ public class ProjectController {
         map.put("repoFullName", p.getRepoFullName());
         map.put("specFilePath", p.getSpecFilePath());
         map.put("branch", p.getBranch());
-
-        // Return boolean true/false instead of exposing secret URLs
-        map.put("slackWebhookUrl", p.getSlackWebhookUrl() != null && !p.getSlackWebhookUrl().isBlank());
-        map.put("discordWebhookUrl", p.getDiscordWebhookUrl() != null && !p.getDiscordWebhookUrl().isBlank());
-
-        // Update: Add webhook token and boolean for github token
         map.put("webhookToken", p.getWebhookToken());
-        map.put("hasGithubToken", p.getGithubToken() != null);
-        // Never expose the actual github token
-
         map.put("lastSpecVersion", p.getLastSpecVersion());
-        map.put("lastSpecContent", p.getLastSpecContent());
         map.put("lastCheckedAt", p.getLastCheckedAt());
         map.put("createdAt", p.getCreatedAt());
+        // Return boolean flags only — never the actual secret values
+        map.put("slackWebhookUrl", p.getSlackWebhookUrl() != null && !p.getSlackWebhookUrl().isBlank());
+        map.put("discordWebhookUrl", p.getDiscordWebhookUrl() != null && !p.getDiscordWebhookUrl().isBlank());
+        map.put("hasGithubToken", p.getGithubToken() != null && !p.getGithubToken().isBlank());
         return map;
+    }
+
+    private User resolveUser(UserDetails userDetails) {
+        return userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
     }
 
     @GetMapping
     public ResponseEntity<List<Map<String, Object>>> getProjects(
             @AuthenticationPrincipal UserDetails userDetails
     ) {
-        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
+        User user = resolveUser(userDetails);
         List<Map<String, Object>> result = projectRepository
                 .findByUserId(user.getId())
                 .stream()
@@ -65,18 +68,34 @@ public class ProjectController {
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getProject(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long id
+    ) {
+        User user = resolveUser(userDetails);
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("Project not found"));
+
+        if (!project.getUser().getId().equals(user.getId())) {
+            return ResponseEntity.status(403).body("Access denied");
+        }
+
+        return ResponseEntity.ok(toMap(project));
+    }
+
     @PostMapping
     public ResponseEntity<?> createProject(
             @AuthenticationPrincipal UserDetails userDetails,
-            @RequestBody ProjectRequest request
+            @Valid @RequestBody ProjectRequest request
     ) {
-        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
+        User user = resolveUser(userDetails);
 
         int repoCount = projectRepository.countByUserId(user.getId());
         int maxRepos = switch (user.getPlan()) {
             case FREE -> 1;
             case TEAM -> 10;
-            case PRO -> Integer.MAX_VALUE;
+            case PRO  -> Integer.MAX_VALUE;
         };
 
         if (repoCount >= maxRepos) {
@@ -86,28 +105,26 @@ public class ProjectController {
         }
 
         Project project = new Project();
-        project.setName(request.getName());
-        project.setRepoFullName(request.getRepoFullName());
-        project.setSpecFilePath(request.getSpecFilePath());
-        project.setBranch(request.getBranch() != null ? request.getBranch() : "main");
-
-        // Prevent saving empty strings as URLs
+        project.setName(request.getName().trim());
+        project.setRepoFullName(request.getRepoFullName().trim());
+        project.setSpecFilePath(request.getSpecFilePath().trim());
+        project.setBranch(
+            request.getBranch() != null && !request.getBranch().isBlank()
+                ? request.getBranch().trim() : "main"
+        );
         project.setSlackWebhookUrl(
-                request.getSlackWebhookUrl() != null && !request.getSlackWebhookUrl().isBlank()
-                        ? request.getSlackWebhookUrl() : null
+            request.getSlackWebhookUrl() != null && !request.getSlackWebhookUrl().isBlank()
+                ? request.getSlackWebhookUrl().trim() : null
         );
         project.setDiscordWebhookUrl(
-                request.getDiscordWebhookUrl() != null && !request.getDiscordWebhookUrl().isBlank()
-                        ? request.getDiscordWebhookUrl() : null
+            request.getDiscordWebhookUrl() != null && !request.getDiscordWebhookUrl().isBlank()
+                ? request.getDiscordWebhookUrl().trim() : null
         );
-
-        // Update: Auto-generate unique webhook token
-        project.setWebhookToken(java.util.UUID.randomUUID().toString().replace("-", ""));
         project.setGithubToken(
-                request.getGithubToken() != null && !request.getGithubToken().isBlank()
-                        ? request.getGithubToken() : null
+            request.getGithubToken() != null && !request.getGithubToken().isBlank()
+                ? request.getGithubToken().trim() : null
         );
-
+        project.setWebhookToken(java.util.UUID.randomUUID().toString().replace("-", ""));
         project.setUser(user);
 
         projectRepository.save(project);
@@ -118,31 +135,34 @@ public class ProjectController {
     public ResponseEntity<?> updateProject(
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long id,
-            @RequestBody ProjectRequest request
+            @Valid @RequestBody ProjectRequest request
     ) {
-        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
-        Project project = projectRepository.findById(id).orElseThrow();
+        User user = resolveUser(userDetails);
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("Project not found"));
 
         if (!project.getUser().getId().equals(user.getId())) {
-            return ResponseEntity.status(403).body("Not your project");
+            return ResponseEntity.status(403).body("Access denied");
         }
 
-        project.setName(request.getName());
-        project.setSpecFilePath(request.getSpecFilePath());
-        project.setBranch(request.getBranch());
-
+        project.setName(request.getName().trim());
+        project.setSpecFilePath(request.getSpecFilePath().trim());
+        project.setBranch(
+            request.getBranch() != null && !request.getBranch().isBlank()
+                ? request.getBranch().trim() : "main"
+        );
         project.setSlackWebhookUrl(
-                request.getSlackWebhookUrl() != null && !request.getSlackWebhookUrl().isBlank()
-                        ? request.getSlackWebhookUrl() : null
+            request.getSlackWebhookUrl() != null && !request.getSlackWebhookUrl().isBlank()
+                ? request.getSlackWebhookUrl().trim() : null
         );
         project.setDiscordWebhookUrl(
-                request.getDiscordWebhookUrl() != null && !request.getDiscordWebhookUrl().isBlank()
-                        ? request.getDiscordWebhookUrl() : null
+            request.getDiscordWebhookUrl() != null && !request.getDiscordWebhookUrl().isBlank()
+                ? request.getDiscordWebhookUrl().trim() : null
         );
-
-        // Optional: Update github token if provided in PUT
         if (request.getGithubToken() != null) {
-            project.setGithubToken(!request.getGithubToken().isBlank() ? request.getGithubToken() : null);
+            project.setGithubToken(
+                !request.getGithubToken().isBlank() ? request.getGithubToken().trim() : null
+            );
         }
 
         projectRepository.save(project);
@@ -154,11 +174,12 @@ public class ProjectController {
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long id
     ) {
-        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
-        Project project = projectRepository.findById(id).orElseThrow();
+        User user = resolveUser(userDetails);
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("Project not found"));
 
         if (!project.getUser().getId().equals(user.getId())) {
-            return ResponseEntity.status(403).body("Not your project");
+            return ResponseEntity.status(403).body("Access denied");
         }
 
         projectRepository.delete(project);
@@ -172,15 +193,18 @@ public class ProjectController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
-        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
-        Project project = projectRepository.findById(id).orElseThrow();
+        int safeSize = Math.min(size, 50);
+
+        User user = resolveUser(userDetails);
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("Project not found"));
 
         if (!project.getUser().getId().equals(user.getId())) {
-            return ResponseEntity.status(403).body("Not your project");
+            return ResponseEntity.status(403).body("Access denied");
         }
 
         Page<ChangeReport> history = changeReportRepository
-                .findByProjectIdOrderByCreatedAtDesc(id, PageRequest.of(page, size));
+                .findByProjectIdOrderByCreatedAtDesc(id, PageRequest.of(page, safeSize));
 
         return ResponseEntity.ok(history);
     }

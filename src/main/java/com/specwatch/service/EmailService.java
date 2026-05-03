@@ -1,4 +1,3 @@
-
 package com.specwatch.service;
 
 import com.resend.Resend;
@@ -18,13 +17,26 @@ public class EmailService {
 
     private final Resend resend;
     private final String fromEmail;
+    private final String appBaseUrl;
 
     public EmailService(
             @Value("${resend.api.key:}") String apiKey,
-            @Value("${resend.from.email:notifications@specwatch.dev}") String fromEmail
+            @Value("${resend.from.email:notifications@specwatch.dev}") String fromEmail,
+            @Value("${app.base-url:https://app.specwatch.dev}") String appBaseUrl
     ) {
         this.resend = apiKey != null && !apiKey.isBlank() ? new Resend(apiKey) : null;
         this.fromEmail = fromEmail;
+        this.appBaseUrl = appBaseUrl;
+    }
+
+    /** Escape user-supplied strings before embedding in HTML to prevent XSS. */
+    private static String esc(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#x27;");
     }
 
     public boolean sendBreakingChangeAlert(
@@ -39,7 +51,6 @@ public class EmailService {
             return false;
         }
 
-        // Only send email for breaking changes
         if (!result.isHasBreakingChanges()) {
             return false;
         }
@@ -72,13 +83,14 @@ public class EmailService {
             <!DOCTYPE html>
             <html>
             <head>
+            <meta charset="UTF-8">
             <style>
-                body { font-family: -apple-system, sans-serif; background: #0a0a0f; color: #e8e8f0; margin: 0; padding: 0; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e8e8f0; margin: 0; padding: 0; }
                 .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
                 .header { text-align: center; margin-bottom: 32px; }
                 .logo { font-size: 24px; font-weight: 700; font-family: monospace; color: #e8e8f0; }
                 .logo span { color: #ff4d6d; }
-                .alert-box { background: rgba(255,77,109,0.1); border: 1px solid #ff4d6d; border-radius: 10px; padding: 24px; margin-bottom: 24px; }
+                .alert-box { background: rgba(255,77,109,0.1); border: 1px solid rgba(255,77,109,0.4); border-radius: 10px; padding: 24px; margin-bottom: 24px; }
                 .alert-title { font-size: 18px; font-weight: 700; color: #ff4d6d; margin-bottom: 8px; }
                 .meta { background: #111118; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 14px; }
                 .meta-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
@@ -105,27 +117,25 @@ public class EmailService {
                 .append(result.getBreakingCount() > 1 ? "s" : "")
                 .append(" Detected</div>");
         sb.append("<div style=\"font-size:14px;color:#e8e8f0;\">Your API spec in <strong>")
-                .append(project.getName())
+                .append(esc(project.getName()))
                 .append("</strong> has breaking changes that may affect your clients.</div>");
         sb.append("</div>");
 
-        // Meta info
         sb.append("<div class=\"meta\">");
         sb.append("<div class=\"meta-row\"><span class=\"meta-label\">Repository</span><span class=\"meta-value\">")
-                .append(project.getRepoFullName()).append("</span></div>");
+                .append(esc(project.getRepoFullName())).append("</span></div>");
         sb.append("<div class=\"meta-row\"><span class=\"meta-label\">Branch</span><span class=\"meta-value\">")
-                .append(project.getBranch()).append("</span></div>");
-        if (commitSha != null) {
+                .append(esc(project.getBranch())).append("</span></div>");
+        if (commitSha != null && !commitSha.isBlank()) {
             sb.append("<div class=\"meta-row\"><span class=\"meta-label\">Commit</span><span class=\"meta-value\">")
-                    .append(commitSha, 0, Math.min(7, commitSha.length())).append("</span></div>");
+                    .append(esc(commitSha.substring(0, Math.min(7, commitSha.length())))).append("</span></div>");
         }
-        if (pushedBy != null) {
+        if (pushedBy != null && !pushedBy.isBlank()) {
             sb.append("<div class=\"meta-row\"><span class=\"meta-label\">Pushed by</span><span class=\"meta-value\">")
-                    .append(pushedBy).append("</span></div>");
+                    .append(esc(pushedBy)).append("</span></div>");
         }
         sb.append("</div>");
 
-        // Breaking changes
         sb.append("<div style=\"margin-bottom:24px;\">");
         sb.append("<div style=\"font-size:14px;font-weight:600;margin-bottom:12px;color:#ff4d6d;\">Breaking Changes</div>");
 
@@ -134,16 +144,15 @@ public class EmailService {
                     .filter(c -> c.getType() == ChangeItem.Type.BREAKING)
                     .forEach(c -> {
                         sb.append("<div class=\"change-item\">");
-                        sb.append("<div class=\"change-endpoint\">✗ ").append(c.getEndpoint()).append("</div>");
-                        sb.append("<div class=\"change-desc\">").append(c.getDescription()).append("</div>");
+                        sb.append("<div class=\"change-endpoint\">✗ ").append(esc(c.getEndpoint())).append("</div>");
+                        sb.append("<div class=\"change-desc\">").append(esc(c.getDescription())).append("</div>");
                         sb.append("</div>");
                     });
         }
         sb.append("</div>");
 
-        // CTA
         sb.append("<div style=\"text-align:center;\">");
-        sb.append("<a href=\"https://specwatch.netlify.app\" class=\"btn\">View Full Report →</a>");
+        sb.append("<a href=\"").append(esc(appBaseUrl)).append("/dashboard\" class=\"btn\">View Full Report →</a>");
         sb.append("</div>");
 
         sb.append("""
