@@ -29,39 +29,29 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         DefaultOAuth2UserService delegate = new DefaultOAuth2UserService();
         OAuth2User oAuth2User = delegate.loadUser(userRequest);
 
-        String registrationId = userRequest.getClientRegistration().getRegistrationId();
         Map<String, Object> attributes = oAuth2User.getAttributes();
 
-        String email;
-        String name;
-
-        if ("github".equals(registrationId)) {
-            email = (String) attributes.get("email");
-            name  = (String) attributes.get("name");
-            if (name == null || name.isBlank()) {
-                name = (String) attributes.get("login");
-            }
-            if (email == null || email.isBlank()) {
-                Object id = attributes.get("id");
-                email = id + "+noreply@users.noreply.github.com";
-            }
-        } else {
-            email = (String) attributes.get("email");
-            name  = (String) attributes.get("name");
+        String email = (String) attributes.get("email");
+        String name  = (String) attributes.get("name");
+        if (name == null || name.isBlank()) {
+            name = (String) attributes.get("login");
+        }
+        if (email == null || email.isBlank()) {
+            Object id = attributes.get("id");
+            email = id + "+noreply@users.noreply.github.com";
         }
 
-        String finalEmail    = email.toLowerCase().trim();
-        String finalName     = (name != null && !name.isBlank()) ? name : finalEmail;
-        String provider      = registrationId.toUpperCase();
+        String finalEmail = email.toLowerCase().trim();
+        String finalName  = (name != null && !name.isBlank()) ? name : finalEmail;
 
         userRepository.findByEmail(finalEmail).orElseGet(() -> {
             User newUser = new User();
             newUser.setEmail(finalEmail);
             newUser.setName(finalName);
-            newUser.setProvider(provider);
+            newUser.setProvider("GITHUB");
             newUser.setEmailVerified(true);
             newUser.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
-            log.info("Created new OAuth2 user: {} via {}", finalEmail, provider);
+            log.info("Created new GitHub OAuth user: {}", finalEmail);
             return userRepository.save(newUser);
         });
 
@@ -69,11 +59,10 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         enriched.put("email", finalEmail);
         enriched.put("name", finalName);
 
-        String nameAttributeKey = "github".equals(registrationId) ? "login" : "sub";
         return new DefaultOAuth2User(
             Collections.singleton(new OAuth2UserAuthority(enriched)),
             enriched,
-            nameAttributeKey
+            "login"
         );
     }
 }
