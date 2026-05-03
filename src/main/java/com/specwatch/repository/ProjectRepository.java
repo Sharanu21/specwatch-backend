@@ -20,4 +20,8 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     );
 
     int countByUserId(Long userId);
+
+    Optional<Project> findByWebhookToken(String webhookToken);
+
+    long countByCreatedAtAfter(java.time.LocalDateTime date);
 }

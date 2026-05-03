@@ -39,6 +39,13 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final EmailVerificationService emailVerificationService;
 
+    @org.springframework.beans.factory.annotation.Value("${admin.email:}")
+    private String adminEmail;
+
+    private boolean isAdmin(String email) {
+        return !adminEmail.isBlank() && adminEmail.equalsIgnoreCase(email);
+    }
+
     private static final int MAX_BUCKET_ENTRIES = 50_000;
 
     // Per-IP rate limiter: max 5 requests per minute on auth endpoints
@@ -88,7 +95,7 @@ public class AuthController {
         String token = jwtUtil.generateToken(userDetails);
 
         return ResponseEntity.ok(new AuthResponse(
-                token, user.getEmail(), user.getName(), user.getPlan().name()
+                token, user.getEmail(), user.getName(), user.getPlan().name(), isAdmin(user.getEmail())
         ));
     }
 
@@ -124,7 +131,7 @@ public class AuthController {
         ).orElseThrow();
 
         return ResponseEntity.ok(new AuthResponse(
-                token, user.getEmail(), user.getName(), user.getPlan().name()
+                token, user.getEmail(), user.getName(), user.getPlan().name(), isAdmin(user.getEmail())
         ));
     }
 
@@ -134,7 +141,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Not authenticated");
         }
         User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
-        return ResponseEntity.ok(new AuthResponse(null, user.getEmail(), user.getName(), user.getPlan().name()));
+        return ResponseEntity.ok(new AuthResponse(null, user.getEmail(), user.getName(), user.getPlan().name(), isAdmin(user.getEmail())));
     }
 
     @PostMapping("/change-password")
